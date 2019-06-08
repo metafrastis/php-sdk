@@ -14,7 +14,7 @@ class Meli {
     protected static $API_ROOT_URL = "https://api.mercadolibre.com";
     protected static $OAUTH_URL    = "/oauth/token";
     public static $AUTH_URL = array(
-        "MLA" => "https://auth.mercadolibre.com.ar", // Argentina 
+        "MLA" => "https://auth.mercadolibre.com.ar", // Argentina
         "MLB" => "https://auth.mercadolivre.com.br", // Brasil
         "MCO" => "https://auth.mercadolibre.com.co", // Colombia
         "MCR" => "https://auth.mercadolibre.com.cr", // Costa Rica
@@ -33,10 +33,10 @@ class Meli {
      * Configuration for CURL
      */
     public static $CURL_OPTS = array(
-        CURLOPT_USERAGENT => "MELI-PHP-SDK-2.0.0", 
+        CURLOPT_USERAGENT => "MELI-PHP-SDK-2.0.0",
         CURLOPT_SSL_VERIFYPEER => true,
-        CURLOPT_CONNECTTIMEOUT => 10, 
-        CURLOPT_RETURNTRANSFER => 1, 
+        CURLOPT_CONNECTTIMEOUT => 10,
+        CURLOPT_RETURNTRANSFER => 1,
         CURLOPT_TIMEOUT => 60
     );
 
@@ -45,6 +45,7 @@ class Meli {
     protected $redirect_uri;
     protected $access_token;
     protected $refresh_token;
+    public $queue = [];
 
     /**
      * Constructor method. Set all variables to connect in Meli
@@ -64,7 +65,7 @@ class Meli {
     /**
      * Return an string with a complete Meli login url.
      * NOTE: You can modify the $AUTH_URL to change the language of login
-     * 
+     *
      * @param string $redirect_uri
      * @return string
      */
@@ -78,21 +79,21 @@ class Meli {
     /**
      * Executes a POST Request to authorize the application and take
      * an AccessToken.
-     * 
+     *
      * @param string $code
      * @param string $redirect_uri
-     * 
+     *
      */
     public function authorize($code, $redirect_uri) {
 
-        if($redirect_uri)
+        if ($redirect_uri)
             $this->redirect_uri = $redirect_uri;
 
         $body = array(
-            "grant_type" => "authorization_code", 
-            "client_id" => $this->client_id, 
-            "client_secret" => $this->client_secret, 
-            "code" => $code, 
+            "grant_type" => "authorization_code",
+            "client_id" => $this->client_id,
+            "client_secret" => $this->client_secret,
+            "code" => $code,
             "redirect_uri" => $this->redirect_uri
         );
 
@@ -100,13 +101,13 @@ class Meli {
             CURLOPT_POST => true,
             CURLOPT_POSTFIELDS => $body
         );
-    
+
         $request = $this->execute(self::$OAUTH_URL, $opts);
 
-        if($request["httpCode"] == 200) {             
+        if ($request["httpCode"] == 200) {
             $this->access_token = $request["body"]->access_token;
 
-            if($request["body"]->refresh_token)
+            if ($request["body"]->refresh_token)
                 $this->refresh_token = $request["body"]->refresh_token;
 
             return $request;
@@ -118,177 +119,214 @@ class Meli {
 
     /**
      * Execute a POST Request to create a new AccessToken from a existent refresh_token
-     * 
+     *
      * @return string|mixed
      */
     public function refreshAccessToken() {
 
-        if($this->refresh_token) {
+        if ($this->refresh_token) {
              $body = array(
-                "grant_type" => "refresh_token", 
-                "client_id" => $this->client_id, 
-                "client_secret" => $this->client_secret, 
+                "grant_type" => "refresh_token",
+                "client_id" => $this->client_id,
+                "client_secret" => $this->client_secret,
                 "refresh_token" => $this->refresh_token
             );
 
             $opts = array(
-                CURLOPT_POST => true, 
+                CURLOPT_POST => true,
                 CURLOPT_POSTFIELDS => $body
             );
-        
+
             $request = $this->execute(self::$OAUTH_URL, $opts);
 
-            if($request["httpCode"] == 200) {             
+            if ($request["httpCode"] == 200) {
                 $this->access_token = $request["body"]->access_token;
 
-                if($request["body"]->refresh_token)
+                if ($request["body"]->refresh_token)
                     $this->refresh_token = $request["body"]->refresh_token;
 
                 return $request;
 
             } else {
                 return $request;
-            }   
+            }
         } else {
             $result = array(
                 'error' => 'Offline-Access is not allowed.',
                 'httpCode'  => null
             );
             return $result;
-        }        
+        }
     }
 
     /**
      * Execute a GET Request
-     * 
+     *
      * @param string $path
      * @param array $params
      * @param boolean $assoc
+     * @param array $options
+     * @param boolean $queue
      * @return mixed
      */
-    public function get($path, $params = null, $assoc = false) {
-        $exec = $this->execute($path, null, $params, $assoc);
-
-        return $exec;
+    public function get($path, $params = null, $assoc = false, $options = [], $queue = false) {
+        if ($queue) {
+            $this->queue($path, $options, $params, $assoc);
+        } else {
+            $exec = $this->execute($path, null, $params, $assoc);
+            return $exec;
+        }
     }
 
     /**
      * Execute a POST Request
-     * 
+     *
      * @param string $body
      * @param array $params
+     * @param boolean $assoc
+     * @param array $options
+     * @param boolean $queue
      * @return mixed
      */
-    public function post($path, $body = null, $params = array()) {
+    public function post($path, $body = null, $params = [], $assoc = false, $options = [], $queue = false) {
         $body = json_encode($body);
         $opts = array(
             CURLOPT_HTTPHEADER => array('Content-Type: application/json'),
-            CURLOPT_POST => true, 
+            CURLOPT_POST => true,
             CURLOPT_POSTFIELDS => $body
         );
-        
-        $exec = $this->execute($path, $opts, $params);
-
-        return $exec;
+        foreach ($options as $key => $value) {
+            $opts[$key] = $value;
+        }
+        if ($queue) {
+            $this->queue($path, $opts, $params, $assoc);
+        } else {
+            $exec = $this->execute($path, $opts, $params, $assoc);
+            return $exec;
+        }
     }
 
     /**
      * Execute a PUT Request
-     * 
+     *
      * @param string $path
      * @param string $body
      * @param array $params
+     * @param boolean $assoc
+     * @param array $options
+     * @param boolean $queue
      * @return mixed
      */
-    public function put($path, $body = null, $params = array()) {
+    public function put($path, $body = null, $params = [], $assoc = false, $options = [], $queue = false) {
         $body = json_encode($body);
         $opts = array(
             CURLOPT_HTTPHEADER => array('Content-Type: application/json'),
             CURLOPT_CUSTOMREQUEST => "PUT",
             CURLOPT_POSTFIELDS => $body
         );
-        
-        $exec = $this->execute($path, $opts, $params);
-
-        return $exec;
+        foreach ($options as $key => $value) {
+            $opts[$key] = $value;
+        }
+        if ($queue) {
+            $this->queue($path, $opts, $params, $assoc);
+        } else {
+            $exec = $this->execute($path, $opts, $params, $assoc);
+            return $exec;
+        }
     }
 
     /**
      * Execute a DELETE Request
-     * 
+     *
      * @param string $path
      * @param array $params
+     * @param boolean $assoc
+     * @param array $options
+     * @param boolean $queue
      * @return mixed
      */
-    public function delete($path, $params) {
+    public function delete($path, $params, $assoc = false, $options = [], $queue = false) {
         $opts = array(
             CURLOPT_CUSTOMREQUEST => "DELETE"
         );
-        
-        $exec = $this->execute($path, $opts, $params);
-        
-        return $exec;
+        foreach ($options as $key => $value) {
+            $opts[$key] = $value;
+        }
+        if ($queue) {
+            $this->queue($path, $opts, $params, $assoc);
+        } else {
+            $exec = $this->execute($path, $opts, $params, $assoc);
+            return $exec;
+        }
     }
 
     /**
      * Execute a OPTION Request
-     * 
+     *
      * @param string $path
      * @param array $params
+     * @param boolean $assoc
+     * @param array $options
+     * @param boolean $queue
      * @return mixed
      */
-    public function options($path, $params = null) {
+    public function options($path, $params = null, $assoc = false, $options = [], $queue = false) {
         $opts = array(
             CURLOPT_CUSTOMREQUEST => "OPTIONS"
         );
-        
-        $exec = $this->execute($path, $opts, $params);
-
-        return $exec;
+        foreach ($options as $key => $value) {
+            $opts[$key] = $value;
+        }
+        if ($queue) {
+            $this->queue($path, $opts, $params, $assoc);
+        } else {
+            $exec = $this->execute($path, $opts, $params, $assoc);
+            return $exec;
+        }
     }
 
     /**
      * Execute all requests and returns the json body and headers
-     * 
+     *
      * @param string $path
      * @param array $opts
      * @param array $params
      * @param boolean $assoc
      * @return mixed
      */
-    public function execute($path, $opts = array(), $params = array(), $assoc = false) {
+    public function execute($path, $opts = [], $params = [], $assoc = false) {
         $uri = $this->make_path($path, $params);
 
         $ch = curl_init($uri);
         curl_setopt_array($ch, self::$CURL_OPTS);
 
-        if(!empty($opts))
+        if (!empty($opts))
             curl_setopt_array($ch, $opts);
 
         $return["body"] = json_decode(curl_exec($ch), $assoc);
         $return["httpCode"] = curl_getinfo($ch, CURLINFO_HTTP_CODE);
 
         curl_close($ch);
-        
+
         return $return;
     }
 
     /**
      * Check and construct an real URL to make request
-     * 
+     *
      * @param string $path
      * @param array $params
      * @return string
      */
-    public function make_path($path, $params = array()) {
+    public function make_path($path, $params = []) {
         if (!preg_match("/^\//", $path)) {
             $path = '/' . $path;
         }
 
         $uri = self::$API_ROOT_URL . $path;
-        
-        if(!empty($params)) {
-            $paramsJoined = array();
+
+        if (!empty($params)) {
+            $paramsJoined = [];
 
             foreach($params as $param => $value) {
                $paramsJoined[] = "$param=$value";
@@ -298,5 +336,52 @@ class Meli {
         }
 
         return $uri;
+    }
+
+    /**
+     * Queue a request to be executed later
+     *
+     * @param string $path
+     * @param array $opts
+     * @param array $params
+     * @param boolean $assoc
+     */
+    public function queue($path, $opts = [], $params = [], $assoc = false) {
+        $this->queue[] = compact('path', 'opts', 'params', 'assoc');
+    }
+
+    /**
+     * Executes all queued requests and returns the json body and headers
+     *
+     * @return mixed
+     */
+    public function multi() {
+        $mh = curl_multi_init();
+        $chs = [];
+        foreach ($this->queue as $key => $request) {
+            $uri = $this->make_path($request['path'], $request['params']);
+            $ch = curl_init($uri);
+            $chs[$key] = $ch;
+            curl_setopt_array($ch, self::$CURL_OPTS);
+            if (!empty($request['opts'])) {
+                curl_setopt_array($ch, $request['opts']);
+            }
+            curl_multi_add_handle($mh, $ch);
+        }
+        $running = 1;
+        do {
+            curl_multi_exec($mh, $running);
+        } while ($running);
+        $responses = [];
+        foreach ($chs as $key => $ch) {
+            curl_multi_remove_handle($mh, $ch);
+            $responses[] = array(
+                'body' => json_decode(curl_multi_getcontent($ch), isset($this->queue[$key]['assoc']) ? $this->queue[$key]['assoc'] : false),
+                'httpCode' => curl_getinfo($ch, CURLINFO_HTTP_CODE)
+            );
+        }
+        curl_multi_close($mh);
+        $this->queue = [];
+        return $responses;
     }
 }
